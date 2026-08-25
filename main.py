@@ -65,3 +65,64 @@ def create_task(task: TaskCreate):
     tasks.append(new_task)
 
     return new_task
+
+
+@app.put("/tasks/{task_id}")
+async def update_task(task_id: int, request: Request):
+    for task in tasks:
+        if task["id"] == task_id:
+            try:
+                data = await request.json()
+            except Exception:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "Invalid JSON body"}
+                )
+
+            if not isinstance(data, dict) or not data:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "Update body cannot be empty"}
+                )
+
+            if "title" in data:
+                if not isinstance(data["title"], str) or not data["title"].strip():
+                    return JSONResponse(
+                        status_code=400,
+                        content={"error": "Title cannot be empty"}
+                    )
+                task["title"] = data["title"]
+
+            if "done" in data:
+                if not isinstance(data["done"], bool):
+                    return JSONResponse(
+                        status_code=400,
+                        content={"error": "Done must be true or false"}
+                    )
+                task["done"] = data["done"]
+
+            if "title" not in data and "done" not in data:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "Provide title or done"}
+                )
+
+            return task
+
+    return JSONResponse(
+        status_code=404,
+        content={"error": f"Task {task_id} not found"}
+    )
+
+
+@app.delete("/tasks/{task_id}", status_code=204)
+def delete_task(task_id: int):
+    for index, task in enumerate(tasks):
+        if task["id"] == task_id:
+            tasks.pop(index)
+            return
+
+    return JSONResponse(
+        status_code=404,
+        content={"error": f"Task {task_id} not found"}
+    )
