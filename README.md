@@ -2,7 +2,7 @@
 
 A simple CRUD API built with Python and FastAPI.
 
-This project was created for the BE-01 Backend AI Engineering Week 2 assignment.
+This project was created for the **BE-01 Backend AI Engineering — Week 2** assignment.
 
 ## Features
 
