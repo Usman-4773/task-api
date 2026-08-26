@@ -86,3 +86,23 @@ Tasks are stored in an **in-memory Python list**. No database is used for this a
 
 **Important:** the screenshot line assumes you have renamed your screenshot folder to `screenshots`.
 ```
+## SQLite Database
+
+### Why SQLite?
+
+SQLite was chosen because it is lightweight, requires no separate database server, and stores the entire database in a single file. It is suitable for this project while providing real persistent database storage.
+
+### Database Location
+
+The SQLite database is stored in:
+
+`tasks.db`
+
+The application automatically creates the database and the `tasks` table when it starts if they do not already exist.
+
+### Running the Project
+
+Activate the virtual environment:
+
+```powershell
+.\.venv\Scripts\Activate.ps1

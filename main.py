@@ -68,19 +68,46 @@ def health():
 
 @app.get("/tasks")
 def get_tasks():
-    return tasks
+    connection = get_db_connection()
+
+    rows = connection.execute(
+        "SELECT id, title, done FROM tasks"
+    ).fetchall()
+
+    connection.close()
+
+    return [
+        {
+            "id": row["id"],
+            "title": row["title"],
+            "done": bool(row["done"])
+        }
+        for row in rows
+    ]
 
 
 @app.get("/tasks/{task_id}")
 def get_task(task_id: int):
-    for task in tasks:
-        if task["id"] == task_id:
-            return task
+    connection = get_db_connection()
 
-    return JSONResponse(
-        status_code=404,
-        content={"error": f"Task {task_id} not found"}
-    )
+    row = connection.execute(
+        "SELECT id, title, done FROM tasks WHERE id = ?",
+        (task_id,)
+    ).fetchone()
+
+    connection.close()
+
+    if row is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Task {task_id} not found"}
+        )
+
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "done": bool(row["done"])
+    }
 
 
 @app.post("/tasks", status_code=201)
@@ -91,75 +118,122 @@ def create_task(task: TaskCreate):
             content={"error": "Title is required and cannot be empty"}
         )
 
-    new_id = max([task["id"] for task in tasks], default=0) + 1
+    connection = get_db_connection()
 
-    new_task = {
-        "id": new_id,
+    cursor = connection.execute(
+        "INSERT INTO tasks (title, done) VALUES (?, ?)",
+        (task.title, 0)
+    )
+
+    task_id = cursor.lastrowid
+
+    connection.commit()
+    connection.close()
+
+    return {
+        "id": task_id,
         "title": task.title,
         "done": False
     }
 
-    tasks.append(new_task)
-
-    return new_task
-
 
 @app.put("/tasks/{task_id}")
 async def update_task(task_id: int, request: Request):
-    for task in tasks:
-        if task["id"] == task_id:
-            try:
-                data = await request.json()
-            except Exception:
-                return JSONResponse(
-                    status_code=400,
-                    content={"error": "Invalid JSON body"}
-                )
+    connection = get_db_connection()
 
-            if not isinstance(data, dict) or not data:
-                return JSONResponse(
-                    status_code=400,
-                    content={"error": "Update body cannot be empty"}
-                )
+    existing_task = connection.execute(
+        "SELECT id, title, done FROM tasks WHERE id = ?",
+        (task_id,)
+    ).fetchone()
 
-            if "title" in data:
-                if not isinstance(data["title"], str) or not data["title"].strip():
-                    return JSONResponse(
-                        status_code=400,
-                        content={"error": "Title cannot be empty"}
-                    )
-                task["title"] = data["title"]
+    if existing_task is None:
+        connection.close()
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Task {task_id} not found"}
+        )
 
-            if "done" in data:
-                if not isinstance(data["done"], bool):
-                    return JSONResponse(
-                        status_code=400,
-                        content={"error": "Done must be true or false"}
-                    )
-                task["done"] = data["done"]
+    try:
+        data = await request.json()
+    except Exception:
+        connection.close()
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Invalid JSON body"}
+        )
 
-            if "title" not in data and "done" not in data:
-                return JSONResponse(
-                    status_code=400,
-                    content={"error": "Provide title or done"}
-                )
+    if not isinstance(data, dict) or not data:
+        connection.close()
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Update body cannot be empty"}
+        )
 
-            return task
+    title = existing_task["title"]
+    done = bool(existing_task["done"])
 
-    return JSONResponse(
-        status_code=404,
-        content={"error": f"Task {task_id} not found"}
+    if "title" in data:
+        if not isinstance(data["title"], str) or not data["title"].strip():
+            connection.close()
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Title cannot be empty"}
+            )
+        title = data["title"]
+
+    if "done" in data:
+        if not isinstance(data["done"], bool):
+            connection.close()
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Done must be true or false"}
+            )
+        done = data["done"]
+
+    if "title" not in data and "done" not in data:
+        connection.close()
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Provide title or done"}
+        )
+
+    connection.execute(
+        "UPDATE tasks SET title = ?, done = ? WHERE id = ?",
+        (title, int(done), task_id)
     )
+
+    connection.commit()
+    connection.close()
+
+    return {
+        "id": task_id,
+        "title": title,
+        "done": done
+    }
 
 
 @app.delete("/tasks/{task_id}", status_code=204)
 def delete_task(task_id: int):
-    for index, task in enumerate(tasks):
-        if task["id"] == task_id:
-            tasks.pop(index)
-            return
+    connection = get_db_connection()
 
-    return JSONResponse(
-        status_code=404,
-        content={"error": f"Task {task_id} not found"}
+    existing_task = connection.execute(
+        "SELECT id FROM tasks WHERE id = ?",
+        (task_id,)
+    ).fetchone()
+
+    if existing_task is None:
+        connection.close()
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Task {task_id} not found"}
+        )
+
+    connection.execute(
+        "DELETE FROM tasks WHERE id = ?",
+        (task_id,)
     )
+
+    connection.commit()
+    connection.close()
+
+    return
