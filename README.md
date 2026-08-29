@@ -270,3 +270,102 @@ DELETE FROM tasks WHERE done = 1;
 
 **Important:** If your existing README already has a `Data Storage` section saying **“in-memory Python list”**, delete that old section and use the new one above.
 ```
+## A3 — Containerized Stack
+
+### Overview
+
+This version of the Task API replaces the previous in-memory storage with a PostgreSQL repository and runs the complete application stack using Docker Compose.
+
+### Architecture
+
+* **FastAPI application:** Python + FastAPI
+* **Database:** PostgreSQL 16
+* **Containerization:** Docker
+* **Orchestration:** Docker Compose
+* **Database driver:** psycopg2
+* **Configuration:** `.env`
+* **Database initialization:** `init/01-create-table.sql`
+* **Persistent storage:** Docker named volume `postgres_data`
+
+### Environment Configuration
+
+The PostgreSQL connection string is stored in `.env`:
+
+`DATABASE_URL=postgresql://postgres:postgres@db:5432/taskdb`
+
+`.env` is excluded from Git using `.gitignore`.
+
+A committed `.env.example` provides the same configuration format without exposing application secrets.
+
+### PostgreSQL Repository
+
+The application now uses a `TaskRepository` backed by PostgreSQL instead of the previous in-memory storage.
+
+The service and API routes were kept unchanged while the storage implementation was switched to PostgreSQL, demonstrating the repository-layer architecture from A2.
+
+### Docker Compose
+
+The application and PostgreSQL database are defined together in `docker-compose.yml`.
+
+The stack can be started with:
+
+```bash
+docker compose up -d
+```
+
+The FastAPI application is available at:
+
+`http://127.0.0.1:8000`
+
+Swagger documentation is available at:
+
+`http://127.0.0.1:8000/docs`
+
+### Persistence Proof
+
+Persistence was tested using the following process:
+
+1. Started the application and PostgreSQL database with Docker Compose.
+2. Created a task through the API:
+
+   * Title: `A3 Docker Persistence Test`
+3. Confirmed the task using `GET /tasks`.
+4. Stopped and removed the containers using:
+
+```bash
+docker compose down
+```
+
+5. Started the stack again using:
+
+```bash
+docker compose up -d
+```
+
+6. Called `GET /tasks` again.
+
+The task was still present after the containers were recreated:
+
+```json
+[
+  {
+    "id": 1,
+    "title": "A3 Docker Persistence Test",
+    "done": false
+  }
+]
+```
+
+This proves that PostgreSQL data persisted across the container restart because the database uses the Docker named volume `postgres_data`.
+
+### A3 Requirements Completed
+
+* PostgreSQL runs in Docker with a persistent volume.
+* Application and database start through Docker Compose.
+* Database connection is configured through `.env`.
+* `.env` is gitignored.
+* `.env.example` is committed.
+* Database table is created through an initialization SQL file.
+* PostgreSQL repository replaces the previous in-memory repository.
+* API routes and service behavior remain unchanged.
+* Data persistence was verified after stopping and restarting the containers.

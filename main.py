@@ -1,51 +1,80 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-import sqlite3
+import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI()
 
-DATABASE = "tasks.db"
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
-def get_db_connection():
-    connection = sqlite3.connect(DATABASE)
-    connection.row_factory = sqlite3.Row
-    return connection
+class TaskRepository:
+    def get_connection(self):
+        return psycopg2.connect(DATABASE_URL)
 
+    def get_all(self):
+        connection = self.get_connection()
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("SELECT id, title, done FROM tasks ORDER BY id")
+        rows = cursor.fetchall()
+        cursor.close()
+        connection.close()
+        return rows
 
-def initialize_database():
-    connection = get_db_connection()
-
-    connection.execute("""
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY,
-            title TEXT NOT NULL,
-            done BOOLEAN NOT NULL DEFAULT 0
+    def get(self, task_id):
+        connection = self.get_connection()
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        cursor.execute(
+            "SELECT id, title, done FROM tasks WHERE id = %s",
+            (task_id,)
         )
-    """)
+        row = cursor.fetchone()
+        cursor.close()
+        connection.close()
+        return row
 
-    task_count = connection.execute(
-        "SELECT COUNT(*) FROM tasks"
-    ).fetchone()[0]
-
-    if task_count == 0:
-        example_tasks = [
-            ("Learn FastAPI", 0),
-            ("Build CRUD API", 0),
-            ("Practice Git", 1)
-        ]
-
-        connection.executemany(
-            "INSERT INTO tasks (title, done) VALUES (?, ?)",
-            example_tasks
+    def create(self, title):
+        connection = self.get_connection()
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
+        cursor.execute(
+            "INSERT INTO tasks (title, done) VALUES (%s, %s) RETURNING id",
+            (title, False)
         )
+        task_id = cursor.fetchone()["id"]
+        connection.commit()
+        cursor.close()
+        connection.close()
+        return task_id
 
-    connection.commit()
-    connection.close()
+    def update(self, task_id, title, done):
+        connection = self.get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            "UPDATE tasks SET title = %s, done = %s WHERE id = %s",
+            (title, done, task_id)
+        )
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+    def delete(self, task_id):
+        connection = self.get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            "DELETE FROM tasks WHERE id = %s",
+            (task_id,)
+        )
+        connection.commit()
+        cursor.close()
+        connection.close()
 
 
-initialize_database()
+repository = TaskRepository()
 
 
 class TaskCreate(BaseModel):
@@ -68,13 +97,7 @@ def health():
 
 @app.get("/tasks")
 def get_tasks():
-    connection = get_db_connection()
-
-    rows = connection.execute(
-        "SELECT id, title, done FROM tasks"
-    ).fetchall()
-
-    connection.close()
+    rows = repository.get_all()
 
     return [
         {
@@ -88,14 +111,7 @@ def get_tasks():
 
 @app.get("/tasks/{task_id}")
 def get_task(task_id: int):
-    connection = get_db_connection()
-
-    row = connection.execute(
-        "SELECT id, title, done FROM tasks WHERE id = ?",
-        (task_id,)
-    ).fetchone()
-
-    connection.close()
+    row = repository.get(task_id)
 
     if row is None:
         return JSONResponse(
@@ -118,17 +134,7 @@ def create_task(task: TaskCreate):
             content={"error": "Title is required and cannot be empty"}
         )
 
-    connection = get_db_connection()
-
-    cursor = connection.execute(
-        "INSERT INTO tasks (title, done) VALUES (?, ?)",
-        (task.title, 0)
-    )
-
-    task_id = cursor.lastrowid
-
-    connection.commit()
-    connection.close()
+    task_id = repository.create(task.title)
 
     return {
         "id": task_id,
@@ -139,15 +145,9 @@ def create_task(task: TaskCreate):
 
 @app.put("/tasks/{task_id}")
 async def update_task(task_id: int, request: Request):
-    connection = get_db_connection()
-
-    existing_task = connection.execute(
-        "SELECT id, title, done FROM tasks WHERE id = ?",
-        (task_id,)
-    ).fetchone()
+    existing_task = repository.get(task_id)
 
     if existing_task is None:
-        connection.close()
         return JSONResponse(
             status_code=404,
             content={"error": f"Task {task_id} not found"}
@@ -156,14 +156,12 @@ async def update_task(task_id: int, request: Request):
     try:
         data = await request.json()
     except Exception:
-        connection.close()
         return JSONResponse(
             status_code=400,
             content={"error": "Invalid JSON body"}
         )
 
     if not isinstance(data, dict) or not data:
-        connection.close()
         return JSONResponse(
             status_code=400,
             content={"error": "Update body cannot be empty"}
@@ -174,7 +172,6 @@ async def update_task(task_id: int, request: Request):
 
     if "title" in data:
         if not isinstance(data["title"], str) or not data["title"].strip():
-            connection.close()
             return JSONResponse(
                 status_code=400,
                 content={"error": "Title cannot be empty"}
@@ -183,7 +180,6 @@ async def update_task(task_id: int, request: Request):
 
     if "done" in data:
         if not isinstance(data["done"], bool):
-            connection.close()
             return JSONResponse(
                 status_code=400,
                 content={"error": "Done must be true or false"}
@@ -191,19 +187,12 @@ async def update_task(task_id: int, request: Request):
         done = data["done"]
 
     if "title" not in data and "done" not in data:
-        connection.close()
         return JSONResponse(
             status_code=400,
             content={"error": "Provide title or done"}
         )
 
-    connection.execute(
-        "UPDATE tasks SET title = ?, done = ? WHERE id = ?",
-        (title, int(done), task_id)
-    )
-
-    connection.commit()
-    connection.close()
+    repository.update(task_id, title, done)
 
     return {
         "id": task_id,
@@ -214,26 +203,14 @@ async def update_task(task_id: int, request: Request):
 
 @app.delete("/tasks/{task_id}", status_code=204)
 def delete_task(task_id: int):
-    connection = get_db_connection()
-
-    existing_task = connection.execute(
-        "SELECT id FROM tasks WHERE id = ?",
-        (task_id,)
-    ).fetchone()
+    existing_task = repository.get(task_id)
 
     if existing_task is None:
-        connection.close()
         return JSONResponse(
             status_code=404,
             content={"error": f"Task {task_id} not found"}
         )
 
-    connection.execute(
-        "DELETE FROM tasks WHERE id = ?",
-        (task_id,)
-    )
-
-    connection.commit()
-    connection.close()
+    repository.delete(task_id)
 
     return
