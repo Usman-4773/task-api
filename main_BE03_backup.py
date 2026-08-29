@@ -1,4 +1,5 @@
 import os
+
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from supabase import create_client, Client
@@ -18,7 +19,9 @@ app = FastAPI(title="Auth Practice API")
 
 @app.get("/")
 def root():
-    return {"message": "Server running and connected to Supabase"}
+    return {
+        "message": "Server running and connected to Supabase"
+    }
 
 
 @app.get("/public/info")
